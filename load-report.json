@@ -1,0 +1,61 @@
+{
+  "messages": 1000,
+  "duplicates_sent": 200,
+  "http_200": 1000,
+  "http_200_including_burst": 1025,
+  "ack_ms": {
+    "p50": 28.76,
+    "p95": 57.31,
+    "p99": 74.78,
+    "max": 88.22,
+    "mean": 31.35
+  },
+  "send_seconds": 1.43,
+  "drain_seconds": 18.93,
+  "accepted": 820,
+  "duplicates": 200,
+  "rate_limited": 5,
+  "jobs": {
+    "done": 820,
+    "pending": 0,
+    "running": 0,
+    "dead": 0
+  },
+  "bookings": {
+    "confirmed": 100,
+    "pending": 0,
+    "failed": 0,
+    "cancelled": 0
+  },
+  "lab_calls": [
+    {
+      "op": "book",
+      "outcome": "http_503",
+      "count": 34
+    },
+    {
+      "op": "check_slots",
+      "outcome": "http_503",
+      "count": 20
+    },
+    {
+      "op": "check_slots",
+      "outcome": "ok",
+      "count": 100
+    },
+    {
+      "op": "book",
+      "outcome": "ok",
+      "count": 100
+    }
+  ],
+  "handoffs": 0,
+  "double_booked_slots": 0,
+  "lab_db_mismatches": 0,
+  "llm": {
+    "input_tokens": 150560,
+    "output_tokens": 10920,
+    "cost_inr": 0.0
+  },
+  "seed": 7
+}

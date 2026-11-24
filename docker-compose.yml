@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: heydoc
+      POSTGRES_PASSWORD: heydoc
+      POSTGRES_DB: heydoc
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U heydoc -d heydoc"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mocklab:
+    build: .
+    command: ["python", "-m", "mocklab"]
+    environment:
+      DATABASE_URL: postgresql://heydoc:heydoc@postgres:5432/heydoc
+      LAB_FAIL_RATE: ${LAB_FAIL_RATE:-0.2}
+      LAB_MIN_LATENCY_MS: ${LAB_MIN_LATENCY_MS:-500}
+      LAB_MAX_LATENCY_MS: ${LAB_MAX_LATENCY_MS:-1500}
+      LAB_SEED: ${LAB_SEED:-7}
+      LAB_PORT: "8001"
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    command: ["python", "-m", "gateway.api"]
+    environment:
+      DATABASE_URL: postgresql://heydoc:heydoc@postgres:5432/heydoc
+      APP_SECRET: ${APP_SECRET:-dev-app-secret}
+      VERIFY_TOKEN: ${VERIFY_TOKEN:-dev-verify-token}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+      LAB_BASE_URL: http://mocklab:8001
+      LAB_CLIENT_TIMEOUT_S: ${LAB_CLIENT_TIMEOUT_S:-4}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
+      MAX_SPEND_INR: ${MAX_SPEND_INR:-500}
+      MAX_LLM_CALLS: ${MAX_LLM_CALLS:-100000}
+      USD_INR: ${USD_INR:-84}
+      DEV_MODE: ${DEV_MODE:-true}
+      API_PORT: "8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mocklab:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+
+  worker:
+    build: .
+    command: ["python", "-m", "gateway.worker"]
+    environment:
+      DATABASE_URL: postgresql://heydoc:heydoc@postgres:5432/heydoc
+      LAB_BASE_URL: http://mocklab:8001
+      LAB_CLIENT_TIMEOUT_S: ${LAB_CLIENT_TIMEOUT_S:-4}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-16}
+      LEASE_SECONDS: ${LEASE_SECONDS:-90}
+      MAX_JOB_ATTEMPTS: ${MAX_JOB_ATTEMPTS:-5}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek/deepseek-chat}
+      MAX_SPEND_INR: ${MAX_SPEND_INR:-500}
+      MAX_LLM_CALLS: ${MAX_LLM_CALLS:-100000}
+      USD_INR: ${USD_INR:-84}
+      RECONCILE_MIN_AGE_S: ${RECONCILE_MIN_AGE_S:-3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mocklab:
+        condition: service_started
+      api:
+        condition: service_started

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lab desk — WhatsApp gateway</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #14170f;
+      --panel: #1d2216;
+      --line: #343824;
+      --ink: #f3f0e4;
+      --muted: #b7b39a;
+      --accent: #e2a53a;
+      --good: #9dcc6a;
+      --bad: #e07a5f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "IBM Plex Sans", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { font-size: 18px; font-weight: 600; margin: 0; }
+    header p { margin: 0; color: var(--muted); font-size: 13px; }
+    main {
+      display: grid;
+      grid-template-columns: minmax(280px, 420px) 1fr;
+      gap: 16px;
+      padding: 16px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+    }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input, button {
+      font: inherit;
+      color: var(--ink);
+      background: #10140c;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    button { cursor: pointer; background: var(--accent); color: #1a1408; border: 0; font-weight: 600; }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .row input { flex: 1; min-width: 0; }
+    #log {
+      min-height: 280px;
+      max-height: 420px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .bubble { padding: 8px 10px; border-radius: 8px; max-width: 90%; white-space: pre-wrap; }
+    .in { background: #2a311c; align-self: flex-end; }
+    .out { background: #10140c; border: 1px solid var(--line); align-self: flex-start; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font: 12px/1.4 "IBM Plex Mono", ui-monospace, monospace;
+      color: var(--muted);
+    }
+    .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .stat { min-width: 90px; }
+    .stat b { display: block; font-size: 18px; color: var(--ink); }
+    .good { color: var(--good); }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Lab desk</h1>
+    <p>Signed webhook, one job per message, one holder per slot.</p>
+  </header>
+  <main>
+    <section>
+      <label for="phone">Synthetic phone</label>
+      <input id="phone" value="919810000099" />
+      <div id="log"></div>
+      <div class="row">
+        <input id="text" placeholder="I want to book a CBC test tomorrow" />
+        <button id="send" type="button">Send</button>
+      </div>
+      <div class="row">
+        <button id="dup" class="secondary" type="button">Send duplicate</button>
+        <button id="race" class="secondary" type="button">Race 10 phones</button>
+        <button id="reset" class="secondary" type="button">Reset</button>
+      </div>
+    </section>
+    <section>
+      <div class="stats" id="stats"></div>
+      <label>Conversation</label>
+      <pre id="state">waiting</pre>
+      <label style="margin-top:10px">Lab bookings</label>
+      <pre id="lab">[]</pre>
+    </section>
+  </main>
+  <script>
+    const phoneEl = document.querySelector("#phone");
+    const textEl = document.querySelector("#text");
+    const logEl = document.querySelector("#log");
+    let lastWamid = null;
+
+    function add(direction, body) {
+      const node = document.createElement("div");
+      node.className = "bubble " + direction;
+      node.textContent = body;
+      logEl.appendChild(node);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function send(text, wamid) {
+      const payload = { phone: phoneEl.value.trim(), text };
+      if (wamid) payload.wamid = wamid;
+      const response = await fetch("/dev/simulate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(JSON.stringify(data));
+      lastWamid = data.wamid;
+      add("in", text + (data.results && data.results[0] && data.results[0].duplicate ? "  (duplicate, not queued)" : ""));
+      return data;
+    }
+
+    async function refresh() {
+      const phone = phoneEl.value.trim();
+      const [conv, summary, lab] = await Promise.all([
+        fetch("/dev/conversation?phone=" + encodeURIComponent(phone)).then((r) => r.json()),
+        fetch("/metrics/summary").then((r) => r.json()),
+        fetch("/dev/lab").then((r) => r.json()),
+      ]);
+      logEl.replaceChildren();
+      for (const turn of conv.turns || []) add(turn.direction === "in" ? "in" : "out", turn.body);
+      document.querySelector("#state").textContent = JSON.stringify({
+        state: conv.state,
+        memory: conv.memory,
+        bookings: conv.bookings,
+      }, null, 2);
+      document.querySelector("#lab").textContent = JSON.stringify(lab.bookings, null, 2);
+      const bookings = summary.bookings || {};
+      document.querySelector("#stats").innerHTML = [
+        ["queued", summary.accepted],
+        ["dupes", summary.duplicates],
+        ["limited", summary.rate_limited],
+        ["confirmed", bookings.confirmed || 0],
+        ["double-booked", summary.double_booked_slots],
+        ["mismatches", summary.lab_db_mismatches],
+        ["INR", (summary.llm && summary.llm.cost_inr) || 0],
+      ].map(([name, value]) => `<div class="stat"><b class="${name === "double-booked" || name === "mismatches" ? "good" : ""}">${value}</b>${name}</div>`).join("");
+    }
+
+    document.querySelector("#send").onclick = async () => {
+      const text = textEl.value.trim();
+      if (!text) return;
+      textEl.value = "";
+      await send(text);
+      setTimeout(refresh, 400);
+    };
+    textEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") document.querySelector("#send").click();
+    });
+    document.querySelector("#dup").onclick = async () => {
+      if (!lastWamid) return;
+      const text = "duplicate of the last message";
+      await send(text, lastWamid);
+      setTimeout(refresh, 300);
+    };
+    document.querySelector("#race").onclick = async () => {
+      document.querySelector("#race").disabled = true;
+      add("out", "Racing 10 phones for one CBC slot…");
+      const response = await fetch("/dev/race", { method: "POST" });
+      const data = await response.json();
+      add("out", `Race finished. Confirmed ${data.confirmed}. Lab rows on the first slot ${data.lab_rows_for_first_slot}.`);
+      document.querySelector("#race").disabled = false;
+      refresh();
+    };
+    document.querySelector("#reset").onclick = async () => {
+      await fetch("/dev/reset", { method: "POST" });
+      lastWamid = null;
+      refresh();
+    };
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>
